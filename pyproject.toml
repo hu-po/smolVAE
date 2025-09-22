@@ -1,0 +1,36 @@
+[project]
+name = "smolvae"
+version = "0.1.0"
+description = "Didactic VAEs in Keras, PyTorch, and JAX with MNIST and W&B logging"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{ name = "Your Name" }]
+
+# We separate framework-specific deps via extras
+[project.optional-dependencies]
+keras = [
+  "tensorflow>=2.14",
+  "wandb>=0.16",
+]
+torch = [
+  "torch>=2.2",
+  "torchvision>=0.17",
+  "wandb>=0.16",
+]
+jax = [
+  "jax>=0.4.23",
+  "flax>=0.8.2",
+  "optax>=0.2.2",
+  "tensorflow-datasets>=4.9",
+  "tensorflow>=2.14",
+  "wandb>=0.16",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+# uv will respect extras; we’ll use separate venvs per framework
+default-groups = []
