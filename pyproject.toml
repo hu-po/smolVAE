@@ -10,20 +10,19 @@ authors = [{ name = "Your Name" }]
 # We separate framework-specific deps via extras
 [project.optional-dependencies]
 keras = [
-  "tensorflow>=2.14",
+  "tensorflow>=2.20",
   "wandb>=0.16",
 ]
 torch = [
-  "torch>=2.2",
-  "torchvision>=0.17",
+  "torch>=2.3",
+  "torchvision>=0.18",
   "wandb>=0.16",
 ]
 jax = [
-  "jax>=0.4.23",
-  "flax>=0.8.2",
-  "optax>=0.2.2",
-  "tensorflow-datasets>=4.9",
-  "tensorflow>=2.14",
+  "jax>=0.7.2",
+  "flax>=0.11.2",
+  "optax>=0.2.6",
+  "pillow>=11",
   "wandb>=0.16",
 ]
 

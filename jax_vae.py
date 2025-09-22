@@ -9,7 +9,8 @@ from jax import random
 import optax
 from flax import linen as nn
 from flax.training import train_state
-import tensorflow_datasets as tfds
+import os
+import urllib.request
 import wandb
 
 
@@ -75,29 +76,32 @@ class Config:
     entity: str | None = None
     smoke: bool = False
 
+def load_mnist_npz(cache_dir: str = os.path.expanduser("~/.cache/smolvae")):
+    os.makedirs(cache_dir, exist_ok=True)
+    path = os.path.join(cache_dir, "mnist.npz")
+    url = "https://storage.googleapis.com/tensorflow/tf-keras-datasets/mnist.npz"
+    if not os.path.exists(path):
+        urllib.request.urlretrieve(url, path)
+    with np.load(path) as data:
+        x_train = data["x_train"].astype(np.float32) / 255.0
+        y_train = data["y_train"]
+        x_test = data["x_test"].astype(np.float32) / 255.0
+        y_test = data["y_test"]
+    x_train = np.expand_dims(x_train, -1)
+    x_test = np.expand_dims(x_test, -1)
+    return (x_train, y_train), (x_test, y_test)
 
-def prepare_ds(split: str, batch_size: int, shuffle: bool):
-    ds = tfds.load("mnist", split=split, as_supervised=True)
+
+def numpy_iterator(arrays, batch_size: int, shuffle: bool):
+    x, y = arrays
+    n = x.shape[0]
+    idx = np.arange(n)
     if shuffle:
-        ds = ds.shuffle(10_000)
-    ds = ds.map(lambda x, y: (tfds.as_dataframe.tf.cast(x, jnp.float32) / 255.0, y))  # type: ignore
-    ds = ds.map(lambda x, y: (jnp.expand_dims(x, -1), y))  # add channel
-    ds = ds.batch(batch_size)
-    ds = tfds.as_numpy(ds)
-    return ds
-
-
-def numpy_iterator(split: str, batch_size: int, shuffle: bool):
-    import tensorflow as tf  # used only for dataset ops if available
-
-    AUTOTUNE = tf.data.AUTOTUNE
-    ds = tfds.load("mnist", split=split, as_supervised=True)
-    if shuffle:
-        ds = ds.shuffle(10_000)
-    ds = ds.map(lambda x, y: (tf.cast(x, tf.float32) / 255.0, y), num_parallel_calls=AUTOTUNE)
-    ds = ds.map(lambda x, y: (tf.expand_dims(x, -1), y), num_parallel_calls=AUTOTUNE)
-    ds = ds.batch(batch_size).prefetch(AUTOTUNE)
-    return tfds.as_numpy(ds)
+        np.random.shuffle(idx)
+    for start in range(0, n, batch_size):
+        end = min(start + batch_size, n)
+        sel = idx[start:end]
+        yield x[sel], y[sel]
 
 
 def create_state(rng, cfg: Config):
@@ -167,14 +171,17 @@ def main():
     rng, init_rng = random.split(rng)
     state, model = create_state(init_rng, cfg)
 
+    # Data
+    (x_train, y_train), (x_test, y_test) = load_mnist_npz()
+
     global_step = 0
     epochs = 1 if cfg.smoke else cfg.epochs
     max_train_steps = 10 if cfg.smoke else None
     max_eval_steps = 3 if cfg.smoke else None
     for epoch in range(epochs):
         # Fresh iterators each epoch
-        train_ds = numpy_iterator("train", 32 if cfg.smoke else cfg.batch_size, shuffle=True)
-        test_ds = numpy_iterator("test", 32 if cfg.smoke else cfg.batch_size, shuffle=False)
+        train_ds = numpy_iterator((x_train, y_train), 32 if cfg.smoke else cfg.batch_size, shuffle=True)
+        test_ds = numpy_iterator((x_test, y_test), 32 if cfg.smoke else cfg.batch_size, shuffle=False)
 
         # Train
         step = 0
@@ -207,7 +214,7 @@ def main():
         wandb.log({"eval_loss": eval_loss, "epoch": epoch}, step=global_step)
 
         # Log a few reconstructions
-        sample_iter = iter(numpy_iterator("test", 16, shuffle=False))
+        sample_iter = iter(numpy_iterator((x_test, y_test), 16, shuffle=False))
         sample = next(sample_iter)[0].astype(np.float32)
         rng, step_rng = random.split(rng)
         logits, _, _ = model.apply({"params": state.params}, jnp.array(sample), step_rng)
@@ -223,3 +230,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")

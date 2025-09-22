@@ -16,30 +16,32 @@ Prerequisites
 
 Install environments
 
-We create three separate virtual environments and sync only the extra for that framework into each. Activation is used so `uv sync` installs into the active venv.
+Create one venv per framework with straight‑forward installs.
 
 - Keras (TensorFlow):
-  - `uv venv .venv-keras`
-  - `source .venv-keras/bin/activate`
-  - `uv sync --no-default-groups --extra keras --active`
+  - `uv venv vkeras`
+  - `source vkeras/bin/activate`
+  - `uv pip install tensorflow wandb`
   - `deactivate`
 
 - PyTorch:
-  - `uv venv .venv-torch`
-  - `source .venv-torch/bin/activate`
-  - `uv sync --no-default-groups --extra torch --active`
+  - `uv venv vtorch`
+  - `source vtorch/bin/activate`
+  - CPU: `uv pip install torch torchvision wandb`
+  - GPU (one‑liner alternative): `uv pip install --index-url https://download.pytorch.org/whl/cu121 torch torchvision wandb`
   - `deactivate`
 
-- JAX (Flax + Optax + TFDS):
-  - `uv venv .venv-jax`
-  - `source .venv-jax/bin/activate`
-  - `uv sync --no-default-groups --extra jax --active`
-  - `deactivate`
+- JAX (GPU, PJRT CUDA 12):
+  - `uv venv vjax`
+  - `source vjax/bin/activate`
+  - `uv pip install --upgrade "jax[cuda12]"`
+  - `uv pip install flax optax wandb pillow`
+  - Verify: `python -c "import jax; print(jax.devices())"` → expect `CudaDevice`
 
 Notes
 
 - The first `uv sync` creates a `uv.lock`. Subsequent syncs are fast and reproducible.
-- CPU wheels are used by default for JAX via `jax[cpu]`. If you need GPU, install the appropriate `jaxlib` wheel per JAX docs.
+- If you use `uv run` inside an activated venv, pass `--active` to avoid creating a `.venv` project env: e.g., `uv run --active python jax_vae.py`.
 
 Run training
 
@@ -52,7 +54,7 @@ Run training
   - `python torch_vae.py --epochs 5 --batch-size 128 --latent-dim 16 --lr 1e-3 --project smolVAE`
 
 - JAX:
-  - `source .venv-jax/bin/activate`
+  - `source vjax/bin/activate`
   - `python jax_vae.py --epochs 5 --batch-size 128 --latent-dim 16 --lr 1e-3 --project smolVAE`
 
 All scripts accept `--entity` to log under a specific wandb entity.
@@ -66,11 +68,9 @@ Smoke tests
 
 GPU notes
 
-- PyTorch GPU: After syncing the `torch` extra, install CUDA-enabled wheels (bundled CUDA) inside the torch venv:
-  - `source .venv-torch/bin/activate && uv pip install --index-url https://download.pytorch.org/whl/cu121 torch torchvision && deactivate`
-- JAX GPU: After syncing the `jax` extra, install a CUDA-enabled `jaxlib` wheel matching your CUDA/cuDNN setup (example for CUDA 12):
-  - `source .venv-jax/bin/activate && uv pip install --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html "jaxlib==0.4.23+cuda12.cudnn89" && deactivate`
-- TensorFlow GPU: The `tensorflow` wheel expects system CUDA/cuDNN libraries (e.g., CUDA 11.8 + cuDNN 8.6 on Linux). If `tf.config.list_physical_devices('GPU')` is empty, verify your local CUDA/cuDNN installation.
+- PyTorch: Installing from the CUDA index URL bundles CUDA libs; only an NVIDIA driver is required.
+- JAX: `jax[cuda12]` installs PJRT CUDA and NVIDIA CUDA libs with `jaxlib`. Ensure a recent NVIDIA driver. Pillow is required for image logging.
+- TensorFlow: The `tensorflow` wheel expects system CUDA/cuDNN. If `tf.config.list_physical_devices('GPU')` is empty, verify your CUDA/cuDNN install.
 
 What’s inside each script
 

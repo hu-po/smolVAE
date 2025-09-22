@@ -10,45 +10,75 @@ from keras import layers
 import tensorflow as tf
 
 
-def build_vae(latent_dim: int = 16):
-    inputs = keras.Input(shape=(28, 28, 1))
-    x = layers.Flatten()(inputs)
-    x = layers.Dense(256, activation="relu")(x)
-    x = layers.Dense(128, activation="relu")(x)
-    z_mean = layers.Dense(latent_dim, name="z_mean")(x)
-    z_logvar = layers.Dense(latent_dim, name="z_logvar")(x)
+class VAE(keras.Model):
+    def __init__(self, latent_dim: int = 16):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.flatten = layers.Flatten()
+        self.enc_dense1 = layers.Dense(256, activation="relu")
+        self.enc_dense2 = layers.Dense(128, activation="relu")
+        self.z_mean = layers.Dense(latent_dim)
+        self.z_logvar = layers.Dense(latent_dim)
+        self.dec_dense1 = layers.Dense(128, activation="relu")
+        self.dec_dense2 = layers.Dense(256, activation="relu")
+        self.dec_out = layers.Dense(28 * 28, activation="sigmoid")
 
-    def sample(args):
-        z_m, z_lv = args
-        eps = tf.random.normal(shape=tf.shape(z_m))
-        return z_m + tf.exp(0.5 * z_lv) * eps
+        self.loss_tracker = keras.metrics.Mean(name="loss")
+        self.recon_tracker = keras.metrics.Mean(name="recon")
+        self.kl_tracker = keras.metrics.Mean(name="kl")
 
-    z = layers.Lambda(sample, name="z")([z_mean, z_logvar])
+    def encode(self, x):
+        x = self.flatten(x)
+        x = self.enc_dense1(x)
+        x = self.enc_dense2(x)
+        mu = self.z_mean(x)
+        logvar = self.z_logvar(x)
+        return mu, logvar
 
-    # Decoder
-    dec_in = keras.Input(shape=(latent_dim,))
-    y = layers.Dense(128, activation="relu")(dec_in)
-    y = layers.Dense(256, activation="relu")(y)
-    y = layers.Dense(28 * 28, activation=None)(y)
-    outputs = layers.Activation("sigmoid")(y)
-    outputs = layers.Reshape((28, 28, 1))(outputs)
-    decoder = keras.Model(dec_in, outputs, name="decoder")
+    def reparameterize(self, mu, logvar):
+        eps = tf.random.normal(shape=tf.shape(mu))
+        return mu + tf.exp(0.5 * logvar) * eps
 
-    recon = decoder(z)
-    vae = keras.Model(inputs, recon, name="vae")
+    def decode(self, z):
+        y = self.dec_dense1(z)
+        y = self.dec_dense2(y)
+        y = self.dec_out(y)
+        return tf.reshape(y, (-1, 28, 28, 1))
 
-    # Loss
-    bce = tf.keras.losses.BinaryCrossentropy(from_logits=False)
+    def call(self, inputs, training=False):
+        mu, logvar = self.encode(inputs)
+        z = self.reparameterize(mu, logvar)
+        x_hat = self.decode(z)
+        return x_hat, mu, logvar
 
-    def vae_loss(x, x_hat):
-        recon_loss = bce(tf.reshape(x, (-1, 28 * 28)), tf.reshape(x_hat, (-1, 28 * 28))) * 28 * 28
-        kl = -0.5 * tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)
-        return tf.reduce_mean(recon_loss + kl)
+    def compute_losses(self, x, x_hat, mu, logvar):
+        x = tf.reshape(x, (-1, 28 * 28))
+        x_hat = tf.reshape(x_hat, (-1, 28 * 28))
+        recon = tf.reduce_sum(tf.keras.losses.binary_crossentropy(x, x_hat))
+        kl = -0.5 * tf.reduce_sum(1.0 + logvar - tf.square(mu) - tf.exp(logvar))
+        loss = (recon + kl) / tf.cast(tf.shape(x)[0], tf.float32)
+        return loss, recon / tf.cast(tf.shape(x)[0], tf.float32), kl / tf.cast(tf.shape(x)[0], tf.float32)
 
-    vae.add_loss(vae_loss(inputs, recon))
-    vae.add_metric(tf.reduce_mean(-0.5 * tf.reduce_sum(1 + z_logvar - tf.square(z_mean) - tf.exp(z_logvar), axis=1)), name="kl", aggregation="mean")
-    vae.compile(optimizer=tf.keras.optimizers.Adam(1e-3))
-    return vae
+    def train_step(self, data):
+        x, _ = data
+        with tf.GradientTape() as tape:
+            x_hat, mu, logvar = self(x, training=True)
+            loss, recon, kl = self.compute_losses(x, x_hat, mu, logvar)
+        grads = tape.gradient(loss, self.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
+        self.loss_tracker.update_state(loss)
+        self.recon_tracker.update_state(recon)
+        self.kl_tracker.update_state(kl)
+        return {"loss": self.loss_tracker.result(), "recon": self.recon_tracker.result(), "kl": self.kl_tracker.result()}
+
+    def test_step(self, data):
+        x, _ = data
+        x_hat, mu, logvar = self(x, training=False)
+        loss, recon, kl = self.compute_losses(x, x_hat, mu, logvar)
+        self.loss_tracker.update_state(loss)
+        self.recon_tracker.update_state(recon)
+        self.kl_tracker.update_state(kl)
+        return {"loss": self.loss_tracker.result(), "recon": self.recon_tracker.result(), "kl": self.kl_tracker.result()}
 
 
 def load_data():
@@ -88,7 +118,8 @@ def main():
         "gpu_detected": len(gpus) > 0,
     })
 
-    model = build_vae(args.latent_dim)
+    model = VAE(args.latent_dim)
+    model.compile(optimizer=tf.keras.optimizers.Adam(1e-3))
     x_train, x_test = load_data()
     # Build tf.data pipelines to support steps_per_epoch
     batch_size = 32 if args.smoke else args.batch_size
@@ -97,7 +128,7 @@ def main():
 
     callbacks = [
         wandb.keras.WandbMetricsLogger(log_freq=100),
-        wandb.keras.WandbModelCheckpoint(filepath="wandb-model")
+        wandb.keras.WandbModelCheckpoint(filepath="wandb-model.keras")
     ]
 
     steps_per_epoch = 5 if args.smoke else None
@@ -115,7 +146,7 @@ def main():
     )
 
     # Log reconstructions
-    x_hat = model.predict(x_test[:16], verbose=0)
+    x_hat, _, _ = model.predict(x_test[:16], verbose=0)
     images = []
     for i in range(16):
         images.append(wandb.Image(x_test[i], caption=f"orig_{i}"))
