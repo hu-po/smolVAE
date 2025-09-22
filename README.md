@@ -1,0 +1,2 @@
+# smolVAE
+didactic VAE
