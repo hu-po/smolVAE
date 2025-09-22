@@ -18,6 +18,14 @@ Install environments
 
 Create one venv per framework with straight‑forward installs.
 
+Quick start (one command):
+- `bash scripts/setup_envs.sh`
+  - Defaults: Keras CPU, Torch CPU, JAX GPU (CUDA 12 PJRT)
+  - Options:
+    - `--torch-gpu` to install Torch CUDA wheels (cu121)
+    - `--jax-cpu` to install JAX CPU only
+    - `--cpu-only` to force CPU for both Torch and JAX
+
 - Keras (TensorFlow):
   - `uv venv vkeras`
   - `source vkeras/bin/activate`
